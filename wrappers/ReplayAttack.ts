@@ -5,9 +5,10 @@ import {
     Contract,
     contractAddress,
     ContractProvider,
+    internal,
     Sender,
     SendMode,
-    external,
+    storeMessageRelaxed,
 } from 'ton-core';
 
 export type ReplayAttackConfig = {
@@ -15,7 +16,7 @@ export type ReplayAttackConfig = {
 };
 
 export function replayAttackConfigToCell(config: ReplayAttackConfig): Cell {
-    return beginCell().storeBuffer(config.publicKey).endCell();
+    return beginCell().storeUint(0, 32).storeBuffer(config.publicKey).endCell();
 }
 
 export class ReplayAttack implements Contract {
@@ -39,6 +40,10 @@ export class ReplayAttack implements Contract {
         });
     }
 
+    async getSeqno(provider: ContractProvider) {
+        return (await provider.get('seqno', [])).stack.readNumber();
+    }
+
     async sendMsg(
         provider: ContractProvider,
         params: {
@@ -46,18 +51,18 @@ export class ReplayAttack implements Contract {
             address: Address;
             amount: bigint;
             signFunc: (buf: Buffer) => Buffer;
+            seqno: number;
         }
     ) {
+        const msg = internal({
+            to: params.address,
+            value: params.amount,
+            body: params.msgToSend,
+        });
+
         const cellToSign = beginCell()
-            .storeRef(
-                beginCell()
-                    .storeUint(0x10, 16) // TODO explain
-                    .storeAddress(params.address)
-                    .storeCoins(params.amount)
-                    .storeUint(1, 1 + 4 + 4 + 64 + 32 + 1 + 1) // TODO explain
-                    .storeRef(params.msgToSend)
-                    .endCell()
-            )
+            .storeUint(params.seqno, 32)
+            .storeRef(beginCell().store(storeMessageRelaxed(msg)).endCell())
             .endCell();
 
         const sig = params.signFunc(cellToSign.hash());

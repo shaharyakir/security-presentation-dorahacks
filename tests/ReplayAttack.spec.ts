@@ -16,13 +16,14 @@ describe('ReplayAttack', () => {
     let code: Cell;
     let replayAttack: OpenedContract<ReplayAttack>;
     let kp: KeyPair;
+    let blockchain: Blockchain;
 
     beforeAll(async () => {
         code = await compile('ReplayAttack');
     });
 
     beforeEach(async () => {
-        const blockchain = await Blockchain.create();
+        blockchain = await Blockchain.create();
         kp = await randomKeyPair();
         replayAttack = blockchain.openContract(
             ReplayAttack.createFromConfig({ publicKey: kp.publicKey }, code)
@@ -48,8 +49,23 @@ describe('ReplayAttack', () => {
                 signFunc: (buf) => sign(buf, kp.secretKey),
                 amount: toNano('0.02'),
                 address: randomAddress(),
+                seqno: 0,
             })
         ).rejects.toThrow();
+    });
+
+    it('signs', async () => {
+        const myCell = beginCell().storeUint(1, 1).endCell();
+
+        const toAddress = randomAddress();
+
+        await replayAttack.sendMsg({
+            msgToSend: myCell,
+            signFunc: (buf) => sign(buf, kp.secretKey),
+            amount: toNano('0.02'),
+            address: toAddress,
+            seqno: 0,
+        });
     });
 
     it('replays', async () => {
@@ -59,7 +75,7 @@ describe('ReplayAttack', () => {
 
         const toAddress = randomAddress();
 
-        await replayAttack.sendMsg({
+        const res = await replayAttack.sendMsg({
             msgToSend: myCell,
             signFunc: (buf) => {
                 firstSig = sign(buf, kp.secretKey);
@@ -67,15 +83,19 @@ describe('ReplayAttack', () => {
             },
             amount: toNano('0.02'),
             address: toAddress,
+            seqno: 0,
         });
 
-        await replayAttack.sendMsg({
-            msgToSend: myCell,
-            signFunc: (buf) => {
-                return firstSig;
-            },
-            amount: toNano('0.02'),
-            address: toAddress,
-        });
+        await expect(
+            replayAttack.sendMsg({
+                msgToSend: myCell,
+                signFunc: (buf) => {
+                    return firstSig;
+                },
+                amount: toNano('0.02'),
+                address: toAddress,
+                seqno: 0,
+            })
+        ).rejects.toThrow();
     });
 });
